@@ -105,46 +105,55 @@ export default {
     size: 20
   }),
   mounted() {
-    let param = Object.assign({}, this.$route.query);
-    let class_arr = param.class ? param.class.split(",") : ["Q282"];
-
-    class SPARQLQueryDispatcher {
-      constructor(endpoint) {
-        this.endpoint = endpoint;
-      }
-
-      query(sparqlQuery) {
-        const fullUrl =
-          this.endpoint + "?query=" + encodeURIComponent(sparqlQuery);
-        const headers = { Accept: "application/sparql-results+json" };
-
-        return fetch(fullUrl, { headers }).then(body => body.json());
-      }
+    this.init();
+  },
+  watch: {
+    $route() {
+      this.init();
     }
+  },
+  methods: {
+    init() {
+      let param = Object.assign({}, this.$route.query);
+      let class_arr = param.class ? param.class.split(",") : ["Q282"];
 
-    const endpointUrl = "https://query.wikidata.org/sparql";
+      class SPARQLQueryDispatcher {
+        constructor(endpoint) {
+          this.endpoint = endpoint;
+        }
 
-    let aaa = "";
-    for (let i = 0; i < class_arr.length; i++) {
-      let class_value = class_arr[i];
-      aaa +=
-        `{  ?item wdt:P31 wd:` +
-        class_value +
-        `;
+        query(sparqlQuery) {
+          const fullUrl =
+            this.endpoint + "?query=" + encodeURIComponent(sparqlQuery);
+          const headers = { Accept: "application/sparql-results+json" };
+
+          return fetch(fullUrl, { headers }).then(body => body.json());
+        }
+      }
+
+      const endpointUrl = "https://query.wikidata.org/sparql";
+
+      let aaa = "";
+      for (let i = 0; i < class_arr.length; i++) {
+        let class_value = class_arr[i];
+        aaa +=
+          `{  ?item wdt:P31 wd:` +
+          class_value +
+          `;
         rdfs:label ?label . }`;
-      if (i != class_arr.length - 1) {
-        aaa += " UNION ";
+        if (i != class_arr.length - 1) {
+          aaa += " UNION ";
+        }
       }
-    }
 
-    const sparqlQuery =
-      `#ネコ
+      const sparqlQuery =
+        `#ネコ
       SELECT DISTINCT *
       WHERE 
       {
   ` +
-      aaa +
-      `
+        aaa +
+        `
     filter(lang(?label) = "en")
     optional { ?item schema:description ?description . filter(lang(?description) = "en")}
     optional { ?item wdt:P18 ?image }
@@ -153,122 +162,117 @@ export default {
     optional { ?item wdt:P176 ?manufacturer . ?manufacturer  rdfs:label ?manufacturer_label . filter(lang(?manufacturer_label) = "en") }
   }`;
 
-    const queryDispatcher = new SPARQLQueryDispatcher(endpointUrl);
-    queryDispatcher.query(sparqlQuery).then(response => {
-      let results = response.results.bindings;
+      const queryDispatcher = new SPARQLQueryDispatcher(endpointUrl);
+      queryDispatcher.query(sparqlQuery).then(response => {
+        let results = response.results.bindings;
 
-      //this.results = results;
+        let index = {};
+        for (let i = 0; i < results.length; i++) {
+          let obj = results[i];
+          for (let key in obj) {
+            let value = obj[key].value;
 
-      //console.log(response);
+            if (key == "inception") {
+              value = value.split("-")[0];
+            }
 
-      let index = {};
-      for (let i = 0; i < results.length; i++) {
-        let obj = results[i];
-        for (let key in obj) {
-          let value = obj[key].value;
-
-          if (key == "inception") {
-            value = value.split("-")[0];
+            if (!index[key]) {
+              index[key] = {};
+            }
+            if (!index[key][value]) {
+              index[key][value] = 0;
+            }
+            index[key][value] += 1;
           }
-
-          if (!index[key]) {
-            index[key] = {};
-          }
-          if (!index[key][value]) {
-            index[key][value] = 0;
-          }
-          index[key][value] += 1;
-        }
-      }
-
-      let aggs = {};
-
-      let op = [
-        {
-          label: "Inception",
-          field: "inception"
-        },
-        {
-          label: "Country",
-          field: "country_label"
-        },
-        {
-          label: "Manufacturer",
-          field: "manufacturer_label"
-        }
-      ];
-
-      let query_aggs = {};
-
-      for (let i = 0; i < op.length; i++) {
-        let obj = op[i];
-        query_aggs[obj.label] = {
-          terms: {
-            field: obj.field,
-            order: {
-              _count: "desc"
-            },
-            size: 20
-          }
-        };
-      }
-
-      for (let label in query_aggs) {
-        let obj = query_aggs[label].terms;
-        let size = Number(obj.size);
-        let field = obj.field.replace(".keyword", "");
-        let map = index[field];
-
-        let map_new = {};
-        for (let value in map) {
-          map_new[value] = map[value];
         }
 
-        //オブジェクトに変換
-        let arr = Object.keys(map_new).map(e => ({
-          key: e,
-          value: map_new[e]
-        }));
+        let aggs = {};
 
-        //値でそーと
-        arr.sort(function(a, b) {
-          if (a.value < b.value) return 1;
-          if (a.value > b.value) return -1;
-          return 0;
-        });
+        let op = [
+          {
+            label: "Inception",
+            field: "inception"
+          },
+          {
+            label: "Country",
+            field: "country_label"
+          },
+          {
+            label: "Manufacturer",
+            field: "manufacturer_label"
+          }
+        ];
 
-        if (size > arr.length) {
-          size = arr.length;
+        let query_aggs = {};
+
+        for (let i = 0; i < op.length; i++) {
+          let obj = op[i];
+          query_aggs[obj.label] = {
+            terms: {
+              field: obj.field,
+              order: {
+                _count: "desc"
+              },
+              size: 20
+            }
+          };
         }
 
-        let buckets = [];
-        for (let i = 0; i < size; i++) {
-          buckets.push({
-            key: arr[i].key,
-            doc_count: arr[i].value
+        for (let label in query_aggs) {
+          let obj = query_aggs[label].terms;
+          let size = Number(obj.size);
+          let field = obj.field.replace(".keyword", "");
+          let map = index[field];
+
+          let map_new = {};
+          for (let value in map) {
+            map_new[value] = map[value];
+          }
+
+          //オブジェクトに変換
+          let arr = Object.keys(map_new).map(e => ({
+            key: e,
+            value: map_new[e]
+          }));
+
+          //値でそーと
+          arr.sort(function(a, b) {
+            if (a.value < b.value) return 1;
+            if (a.value > b.value) return -1;
+            return 0;
           });
-        }
 
-        aggs[field] = {
-          buckets: buckets
-        };
-      }
-
-      let result = {
-        aggregations: aggs,
-        hits: {
-          hits: results,
-          total: {
-            relation: "gte",
-            value: results.length
+          if (size > arr.length) {
+            size = arr.length;
           }
+
+          let buckets = [];
+          for (let i = 0; i < size; i++) {
+            buckets.push({
+              key: arr[i].key,
+              doc_count: arr[i].value
+            });
+          }
+
+          aggs[field] = {
+            buckets: buckets
+          };
         }
-      };
 
-      //console.log(result);
+        let result = {
+          aggregations: aggs,
+          hits: {
+            hits: results,
+            total: {
+              relation: "gte",
+              value: results.length
+            }
+          }
+        };
 
-      this.results = result;
-    });
+        this.results = result;
+      });
+    }
   },
   computed: {
     // 算出 getter 関数
